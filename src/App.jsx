@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+/**
+ * ອາຫານKcal – Responsive Kcal & Macros Tracker (Light Theme)
+ * + ເພີ່ມຕາຕະລາງຄຳນວນ BMI, BMR, TDEE ຈາກ: ອາຍຸ, ສູງ (cm), ນ້ຳໜັກ (kg), %ໄຂມັນ ແລະ ຈຳນວນມື້/ອາທິດ ທີ່ອອກກຳລັງກາຍ
+ * - TDEE ແມປທາງມາດຕະຖານ: 0=1.2, 1–2=1.375, 3–4=1.55, 5–6=1.725, ≥7=1.9
+ * - BMR: ຖ້າມີ %BF ໃຊ້ Katch–McArdle, ບໍ່ງັ້ນໃຊ້ Mifflin–St Jeor
+ */
+
 // ===== Types & Constants =====
 const CATEGORIES = {
   PROTEIN_RAW: "Raw protein (100g)",
@@ -15,19 +22,8 @@ const MEALS = [
   { key: "dinner", label: "ຄາບແລງ (Dinner)" },
 ];
 
-const DAILY_TARGETS = {
-  kcal: 1500,
-  protein: 120, // g
-  fat: 45,      // g
-  carbs: 153,   // g
-  sodium: 2000, // mg
-  sugar: 14,    // g
-};
-
-const UNIT_TYPES = {
-  PER_100G: "per100g",
-  PER_SERVING: "perServing",
-};
+const DAILY_TARGETS = { kcal: 1500, protein: 120, fat: 45, carbs: 153, sodium: 2000, sugar: 14 };
+const UNIT_TYPES = { PER_100G: "per100g", PER_SERVING: "perServing" };
 
 // ===== Base Database (editable) =====
 const BASE_DB = [
@@ -50,7 +46,7 @@ const BASE_DB = [
 ];
 
 // ===== Helpers =====
-const STORAGE_KEYS = { DB: "kcal_db_v1", LOG: "kcal_log_v1", TARGETS: "kcal_targets_v1" };
+const STORAGE_KEYS = { DB: "kcal_db_v1", LOG: "kcal_log_v1", TARGETS: "kcal_targets_v1", PROFILE: "kcal_profile_v1" };
 const safeUUID = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "id_" + Math.random().toString(36).slice(2) + Date.now().toString(36));
 const clone = (obj) => (typeof structuredClone === "function" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)));
 const blankRow = () => ({ id: safeUUID(), foodId: "", amount: "" });
@@ -60,41 +56,18 @@ const readLS = (k, fallback) => { try { const raw = localStorage.getItem(k); if 
 const writeLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-export function computeNutrients(food, amountInput) {
-  if (!food) return { kcal: 0, protein: 0, fat: 0, carbs: 0, sodium: 0, sugar: 0 };
-  const amount = clampNumber(amountInput, 0, 100000);
-  if (food.unitType === UNIT_TYPES.PER_100G) {
-    const factor = amount / 100;
-    return {
-      kcal: food.nutrients.kcal * factor,
-      protein: food.nutrients.protein * factor,
-      fat: food.nutrients.fat * factor,
-      carbs: food.nutrients.carbs * factor,
-      sodium: food.nutrients.sodium * factor,
-      sugar: food.nutrients.sugar * factor,
-    };
-  }
-  const factor = amount; // per serving
-  return {
-    kcal: food.nutrients.kcal * factor,
-    protein: food.nutrients.protein * factor,
-    fat: food.nutrients.fat * factor,
-    carbs: food.nutrients.carbs * factor,
-    sodium: food.nutrients.sodium * factor,
-    sugar: food.nutrients.sugar * factor,
-  };
-}
-
-export function sumNutri(rows, db) {
-  return rows.reduce((acc, r) => {
-    const f = db.find((d) => d.id === r.foodId);
-    const n = computeNutrients(f, r.amount);
-    acc.kcal += n.kcal; acc.protein += n.protein; acc.fat += n.fat; acc.carbs += n.carbs; acc.sodium += n.sodium; acc.sugar += n.sugar;
-    return acc;
-  }, { kcal: 0, protein: 0, fat: 0, carbs: 0, sodium: 0, sugar: 0 });
-}
-
-export const pctOf = (val, target) => (target > 0 ? Math.min(100, (val / target) * 100) : 0);
+// ===== Health Calculations =====
+const bmiCalc = (kg, cm) => { const m = cm / 100; if (!kg || !cm || !m) return 0; return kg / (m * m); };
+const mifflin = (sex, kg, cm, age) => 10 * kg + 6.25 * cm - 5 * age + (sex === "male" ? 5 : -161);
+const katch = (kg, bodyFatPct) => { if (!bodyFatPct || bodyFatPct <= 0) return null; const lbm = kg * (1 - bodyFatPct / 100); return 370 + 21.6 * lbm; };
+const activityFactorFromWorkouts = (workoutsPerWeek) => {
+  const w = Math.max(0, Math.floor(workoutsPerWeek || 0));
+  if (w === 0) return { af: 1.2, label: "Sedentary" };
+  if (w <= 2) return { af: 1.375, label: "Light (1–2x/wk)" };
+  if (w <= 4) return { af: 1.55, label: "Moderate (3–4x/wk)" };
+  if (w <= 6) return { af: 1.725, label: "Hard (5–6x/wk)" };
+  return { af: 1.9, label: "Athlete (≥7x/wk)" };
+};
 
 function Pill({ children, tone = "stone" }) {
   const tones = {
@@ -127,13 +100,33 @@ function ProgressBar({ value = 0 }) {
   );
 }
 
+// ===== Main App =====
 export default function App() {
+  // Logs / targets
   const [date, setDate] = useState(todayISO());
   const [db, setDb] = useState(() => readLS(STORAGE_KEYS.DB, BASE_DB));
   const [targets, setTargets] = useState(() => readLS(STORAGE_KEYS.TARGETS, DAILY_TARGETS));
   const [log, setLog] = useState(() => readLS(STORAGE_KEYS.LOG, {}));
-  const [newFood, setNewFood] = useState({ name: "", category: CATEGORIES.PROTEIN_RAW, unitType: UNIT_TYPES.PER_100G, servingSize: 100, nutrients: { kcal: "", protein: "", fat: "", carbs: "", sodium: "", sugar: "" } });
 
+  // Profile for BMI/BMR/TDEE
+  const [profile, setProfile] = useState(() => readLS(STORAGE_KEYS.PROFILE, {
+    sex: "male",
+    age: 25,
+    heightCm: 170,
+    weightKg: 65,
+    bodyFat: 0, // optional
+    workoutsPerWeek: 3,
+  }));
+
+  const [newFood, setNewFood] = useState({
+    name: "",
+    category: CATEGORIES.PROTEIN_RAW,
+    unitType: UNIT_TYPES.PER_100G,
+    servingSize: 100,
+    nutrients: { kcal: "", protein: "", fat: "", carbs: "", sodium: "", sugar: "" },
+  });
+
+  // init per-day log
   useEffect(() => {
     setLog((prev) => {
       const next = { ...prev };
@@ -142,10 +135,13 @@ export default function App() {
     });
   }, [date]);
 
+  // persist
   useEffect(() => writeLS(STORAGE_KEYS.DB, db), [db]);
   useEffect(() => writeLS(STORAGE_KEYS.TARGETS, targets), [targets]);
   useEffect(() => writeLS(STORAGE_KEYS.LOG, log), [log]);
+  useEffect(() => writeLS(STORAGE_KEYS.PROFILE, profile), [profile]);
 
+  // derived logs
   const dayLog = log[date] ?? { breakfast: [blankRow()], lunch: [blankRow()], dinner: [blankRow()] };
 
   const totals = {
@@ -162,6 +158,27 @@ export default function App() {
     sugar: totals.breakfast.sugar + totals.lunch.sugar + totals.dinner.sugar,
   };
 
+  // BMI/BMR/TDEE derived
+  const health = useMemo(() => {
+    const age = clampNumber(profile.age, 0, 150);
+    const heightCm = clampNumber(profile.heightCm, 0, 300);
+    const weightKg = clampNumber(profile.weightKg, 0, 500);
+    const bodyFat = clampNumber(profile.bodyFat, 0, 80);
+
+    const bmi = bmiCalc(weightKg, heightCm);
+    const bmrKatch = katch(weightKg, bodyFat);
+    const bmrMifflin = mifflin(profile.sex, weightKg, heightCm, age);
+    const bmr = bmrKatch ?? bmrMifflin;
+
+    const { af, label } = activityFactorFromWorkouts(profile.workoutsPerWeek);
+    const tdee = bmr * af;
+
+    const bmiCat = bmi === 0 ? "-" : bmi < 18.5 ? "Underweight" : bmi < 25 ? "Normal" : bmi < 30 ? "Overweight" : "Obese";
+
+    return { bmi, bmiCat, bmr, bmrFormula: bmrKatch ? "Katch–McArdle" : "Mifflin–St Jeor", af, afLabel: label, tdee };
+  }, [profile]);
+
+  // row ops
   const doSetRows = (mealKey, rows) => setLog((prev) => ({ ...prev, [date]: { ...dayLog, [mealKey]: rows } }));
   const addRow = (mealKey) => doSetRows(mealKey, [...dayLog[mealKey], blankRow()]);
   const removeRow = (mealKey, rowId) => doSetRows(mealKey, dayLog[mealKey].filter((r) => r.id !== rowId));
@@ -277,8 +294,79 @@ export default function App() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+        {/* ===== Health Section: BMI/BMR/TDEE ===== */}
+        <SectionCard title="ຄຳນວນ BMI / BMR / TDEE" subtitle={<span className="text-xs">ອ້າງອີງມາດຕະຖານ</span>}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Inputs */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="flex items-center gap-2"><label className="w-20 text-gray-700">Sex</label>
+                  <select className="w-28 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-2 py-1"
+                    value={profile.sex} onChange={(e)=>setProfile({...profile, sex:e.target.value})}>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2"><label className="w-20 text-gray-700">Age</label>
+                  <input inputMode="numeric" className="w-24 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-2 py-1"
+                    value={profile.age} onChange={(e)=>setProfile({...profile, age:e.target.value})}/>
+                </div>
+                <div className="flex items-center gap-2"><label className="w-20 text-gray-700">Height</label>
+                  <div className="flex items-center gap-1">
+                    <input inputMode="decimal" className="w-24 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-2 py-1" value={profile.heightCm} onChange={(e)=>setProfile({...profile, heightCm:e.target.value})}/>
+                    <span className="text-xs text-gray-500">cm</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2"><label className="w-20 text-gray-700">Weight</label>
+                  <div className="flex items-center gap-1">
+                    <input inputMode="decimal" className="w-24 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-2 py-1" value={profile.weightKg} onChange={(e)=>setProfile({...profile, weightKg:e.target.value})}/>
+                    <span className="text-xs text-gray-500">kg</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2"><label className="w-20 text-gray-700">Body fat</label>
+                  <div className="flex items-center gap-1">
+                    <input inputMode="decimal" className="w-24 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-2 py-1" value={profile.bodyFat} onChange={(e)=>setProfile({...profile, bodyFat:e.target.value})} />
+                    <span className="text-xs text-gray-500">%</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2"><label className="w-20 text-gray-700">Workouts</label>
+                  <div className="flex items-center gap-1">
+                    <input inputMode="numeric" className="w-24 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-2 py-1" value={profile.workoutsPerWeek} onChange={(e)=>setProfile({...profile, workoutsPerWeek:e.target.value})} />
+                    <span className="text-xs text-gray-500">/wk</span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">TDEE ແມປ: 0→1.2, 1–2→1.375, 3–4→1.55, 5–6→1.725, ≥7→1.9</p>
+            </div>
+
+            {/* Results */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="p-3 rounded-xl bg-white ring-1 ring-gray-200">
+                  <div className="flex items-center justify-between"><span className="text-gray-700">BMI</span><Pill>{health.bmiCat}</Pill></div>
+                  <div className="mt-2 text-right text-lg font-semibold"><NumberCell value={health.bmi} /></div>
+                </div>
+                <div className="p-3 rounded-xl bg-white ring-1 ring-gray-200">
+                  <div className="flex items-center justify-between"><span className="text-gray-700">BMR</span><Pill>{health.bmrFormula}</Pill></div>
+                  <div className="mt-2 text-right text-lg font-semibold">{fmt(health.bmr,0)} kcal</div>
+                </div>
+                <div className="p-3 rounded-xl bg-white ring-1 ring-gray-200">
+                  <div className="flex items-center justify-between"><span className="text-gray-700">Activity</span><Pill>{health.afLabel}</Pill></div>
+                  <div className="mt-2 text-right text-lg font-semibold">× {health.af}</div>
+                </div>
+                <div className="p-3 rounded-xl bg-white ring-1 ring-gray-200">
+                  <div className="flex items-center justify-between"><span className="text-gray-700">TDEE</span><Pill>Daily</Pill></div>
+                  <div className="mt-2 text-right text-lg font-semibold">{fmt(health.tdee,0)} kcal</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* ===== Targets & Day Summary ===== */}
         <SectionCard title="Daily Targets (ຄ່າອ້າງອີງ)" subtitle={<span className="text-xs">Editable</span>}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* editor */}
             <div className="space-y-3">
               {Object.entries(targets).map(([k, v]) => (
                 <div key={k} className="flex items-center gap-2">
@@ -291,8 +379,9 @@ export default function App() {
               ))}
             </div>
 
+            {/* Day vs target */}
             <div className="md:col-span-2 grid grid-cols-2 md:grid-cols-3 gap-4">
-              {[["kcal","Kcal"],["protein","Protein (g)"],["fat","Fat (g)"],["carbs","Carb (g)"],["sodium","Sodium (mg)"],["sugar","Sugar (g)"]].map(([k, label]) => (
+              {[ ["kcal","Kcal"], ["protein","Protein (g)"], ["fat","Fat (g)"], ["carbs","Carb (g)"], ["sodium","Sodium (mg)"], ["sugar","Sugar (g)"] ].map(([k, label]) => (
                 <div key={k} className="p-3 rounded-xl bg-white ring-1 ring-gray-200">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-700">{label}</span>
@@ -305,8 +394,10 @@ export default function App() {
           </div>
         </SectionCard>
 
+        {/* ===== Meals ===== */}
         {MEALS.map((m) => renderMeal(m.key, m.label, totals[m.key]))}
 
+        {/* ===== Daily Total ===== */}
         <SectionCard title="ສະຫຼຸບ 1 ມື້ (Daily Total)">
           <div className="overflow-x-auto -mx-4 md:mx-0">
             <table className="min-w-[640px] w-full text-sm">
@@ -339,6 +430,7 @@ export default function App() {
           </div>
         </SectionCard>
 
+        {/* ===== Food DB ===== */}
         <SectionCard title="Food Database (ໂຕຂໍ້ມູນອາຫານ)" subtitle={<span className="text-xs">Add / Delete / View</span>}>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-3">
@@ -413,3 +505,41 @@ export default function App() {
     </div>
   );
 }
+
+// ===== Computation utilities used above =====
+export function computeNutrients(food, amountInput) {
+  if (!food) return { kcal: 0, protein: 0, fat: 0, carbs: 0, sodium: 0, sugar: 0 };
+  const amount = clampNumber(amountInput, 0, 100000);
+  if (food.unitType === UNIT_TYPES.PER_100G) {
+    const factor = amount / 100; // grams → per 100g
+    return {
+      kcal: food.nutrients.kcal * factor,
+      protein: food.nutrients.protein * factor,
+      fat: food.nutrients.fat * factor,
+      carbs: food.nutrients.carbs * factor,
+      sodium: food.nutrients.sodium * factor,
+      sugar: food.nutrients.sugar * factor,
+    };
+  }
+  // per serving: amount = number of servings
+  const factor = amount;
+  return {
+    kcal: food.nutrients.kcal * factor,
+    protein: food.nutrients.protein * factor,
+    fat: food.nutrients.fat * factor,
+    carbs: food.nutrients.carbs * factor,
+    sodium: food.nutrients.sodium * factor,
+    sugar: food.nutrients.sugar * factor,
+  };
+}
+
+export function sumNutri(rows, db) {
+  return rows.reduce((acc, r) => {
+    const f = db.find((d) => d.id === r.foodId);
+    const n = computeNutrients(f, r.amount);
+    acc.kcal += n.kcal; acc.protein += n.protein; acc.fat += n.fat; acc.carbs += n.carbs; acc.sodium += n.sodium; acc.sugar += n.sugar;
+    return acc;
+  }, { kcal: 0, protein: 0, fat: 0, carbs: 0, sodium: 0, sugar: 0 });
+}
+
+export const pctOf = (val, target) => (target > 0 ? Math.min(100, (val / target) * 100) : 0);
