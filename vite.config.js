@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// base ต้องตรงกับชื่อ repo บน GitHub Pages
-export default defineConfig({
+export default defineConfig(() => ({
   plugins: [react()],
-  base: '/kcal-tracker/',
-})
+  // ถ้า build บน Vercel ให้ base = '/' ; ถ้าไม่ใช่ให้ใช้ของ GitHub Pages
+  base: process.env.VERCEL ? '/' : '/kcal-tracker/',
+}))
