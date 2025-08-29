@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+// ===== Types & Constants =====
 const CATEGORIES = {
   PROTEIN_RAW: "Raw protein (100g)",
   CARB_COOKED: "Carb cooked (100g)",
@@ -14,9 +15,21 @@ const MEALS = [
   { key: "dinner", label: "ຄາບແລງ (Dinner)" },
 ];
 
-const DAILY_TARGETS = { kcal: 1500, protein: 120, fat: 45, carbs: 153, sodium: 2000, sugar: 14 };
-const UNIT_TYPES = { PER_100G: "per100g", PER_SERVING: "perServing" };
+const DAILY_TARGETS = {
+  kcal: 1500,
+  protein: 120, // g
+  fat: 45,      // g
+  carbs: 153,   // g
+  sodium: 2000, // mg
+  sugar: 14,    // g
+};
 
+const UNIT_TYPES = {
+  PER_100G: "per100g",
+  PER_SERVING: "perServing",
+};
+
+// ===== Base Database (editable) =====
 const BASE_DB = [
   { id: "chicken_breast", name: "Chicken Breast (ເອິກໄກ່)", category: CATEGORIES.PROTEIN_RAW, unitType: UNIT_TYPES.PER_100G, servingSize: 100, nutrients: { kcal: 165, protein: 31, fat: 3.6, carbs: 0, sodium: 74, sugar: 0 } },
   { id: "chicken_thigh", name: "Chicken Thigh (ສະໂພກໄກ່)", category: CATEGORIES.PROTEIN_RAW, unitType: UNIT_TYPES.PER_100G, servingSize: 100, nutrients: { kcal: 209, protein: 26, fat: 10.9, carbs: 0, sodium: 89, sugar: 0 } },
@@ -36,6 +49,7 @@ const BASE_DB = [
   { id: "tomato", name: "Tomato", category: CATEGORIES.VEG, unitType: UNIT_TYPES.PER_100G, servingSize: 100, nutrients: { kcal: 18, protein: 0.9, fat: 0.2, carbs: 3.9, sodium: 5, sugar: 2.6 } },
 ];
 
+// ===== Helpers =====
 const STORAGE_KEYS = { DB: "kcal_db_v1", LOG: "kcal_log_v1", TARGETS: "kcal_targets_v1" };
 const safeUUID = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "id_" + Math.random().toString(36).slice(2) + Date.now().toString(36));
 const clone = (obj) => (typeof structuredClone === "function" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)));
@@ -51,10 +65,24 @@ export function computeNutrients(food, amountInput) {
   const amount = clampNumber(amountInput, 0, 100000);
   if (food.unitType === UNIT_TYPES.PER_100G) {
     const factor = amount / 100;
-    return { kcal: food.nutrients.kcal * factor, protein: food.nutrients.protein * factor, fat: food.nutrients.fat * factor, carbs: food.nutrients.carbs * factor, sodium: food.nutrients.sodium * factor, sugar: food.nutrients.sugar * factor };
+    return {
+      kcal: food.nutrients.kcal * factor,
+      protein: food.nutrients.protein * factor,
+      fat: food.nutrients.fat * factor,
+      carbs: food.nutrients.carbs * factor,
+      sodium: food.nutrients.sodium * factor,
+      sugar: food.nutrients.sugar * factor,
+    };
   }
   const factor = amount; // per serving
-  return { kcal: food.nutrients.kcal * factor, protein: food.nutrients.protein * factor, fat: food.nutrients.fat * factor, carbs: food.nutrients.carbs * factor, sodium: food.nutrients.sodium * factor, sugar: food.nutrients.sugar * factor };
+  return {
+    kcal: food.nutrients.kcal * factor,
+    protein: food.nutrients.protein * factor,
+    fat: food.nutrients.fat * factor,
+    carbs: food.nutrients.carbs * factor,
+    sodium: food.nutrients.sodium * factor,
+    sugar: food.nutrients.sugar * factor,
+  };
 }
 
 export function sumNutri(rows, db) {
@@ -186,7 +214,7 @@ export default function App() {
               return (
                 <tr key={row.id} className="border-t border-gray-200 hover:bg-gray-50">
                   <td className="p-2">
-                    <select className={`w-52 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg p-2 text-gray-900`} value={row.foodId} onChange={(e) => updateRow(mealKey, row.id, { foodId: e.target.value })}>
+                    <select className="w-52 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg p-2 text-gray-900" value={row.foodId} onChange={(e) => updateRow(mealKey, row.id, { foodId: e.target.value })}>
                       <option value="">— Select food —</option>
                       {[...groupedDb.keys()].map((cat) => (
                         <optgroup key={cat} label={cat}>
@@ -199,7 +227,7 @@ export default function App() {
                   </td>
                   <td className="p-2">
                     <div className="flex items-center gap-2">
-                      <input inputMode="decimal" placeholder={food?.unitType === UNIT_TYPES.PER_SERVING ? "servings" : "grams"} className={`w-24 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg p-2 text-gray-900`} value={row.amount} onChange={(e) => updateRow(mealKey, row.id, { amount: e.target.value })} />
+                      <input inputMode="decimal" placeholder={food?.unitType === UNIT_TYPES.PER_SERVING ? "servings" : "grams"} className="w-24 bg-white ring-1 ring-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg p-2 text-gray-900" value={row.amount} onChange={(e) => updateRow(mealKey, row.id, { amount: e.target.value })} />
                       <span className="text-gray-500 text-xs">{food ? (food.unitType === UNIT_TYPES.PER_SERVING ? `servings (1 = ${food.servingSize}g)` : "g") : ""}</span>
                     </div>
                   </td>
@@ -216,7 +244,7 @@ export default function App() {
           </tbody>
           <tfoot>
             <tr className="border-t border-gray-300 bg-gray-50/80">
-              <td className="p-3"><button onClick={() => addRow(mealKey)} className={`px-3 py-2 rounded-xl bg-gray-700 text-white font-medium hover:bg-gray-800`}>+ Add item</button></td>
+              <td className="p-3"><button onClick={() => addRow(mealKey)} className="px-3 py-2 rounded-xl bg-gray-700 text-white font-medium hover:bg-gray-800">+ Add item</button></td>
               <td className="p-3 text-right font-semibold text-gray-800">Totals</td>
               <td className="p-3 text-right font-semibold text-gray-800"><NumberCell value={totalsForMeal.kcal} /></td>
               <td className="p-3 text-right font-semibold text-gray-800"><NumberCell value={totalsForMeal.protein} /></td>
@@ -237,12 +265,12 @@ export default function App() {
       <header className="sticky top-0 z-50 backdrop-blur bg-white/80 ring-1 ring-gray-300">
         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={`size-9 rounded-xl bg-gray-700`} />
+            <div className="size-9 rounded-xl bg-gray-700" />
             <h1 className="text-xl md:text-2xl font-bold tracking-tight">ອາຫານKcal – Food Kcal</h1>
           </div>
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Date</label>
-            <input type="date" className={`bg-white ring-1 ring-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-3 py-2`} value={date} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" className="bg-white ring-1 ring-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-600 rounded-lg px-3 py-2" value={date} onChange={(e) => setDate(e.target.value)} />
             <button onClick={resetAll} className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-800 text-white">Reset meals</button>
           </div>
         </div>
@@ -337,7 +365,7 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              <button onClick={addFood} className={`px-3 py-1.5 rounded-lg bg-gray-700 text-white font-semibold hover:bg-gray-800 text-sm`}>Add food</button>
+              <button onClick={addFood} className="px-3 py-1.5 rounded-lg bg-gray-700 text-white font-semibold hover:bg-gray-800 text-sm">Add food</button>
             </div>
 
             <div className="space-y-3">
